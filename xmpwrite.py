@@ -232,14 +232,24 @@ def main():
         sys.stdout.writelines(diff)
         return
 
-    target = Path(args.out) if args.out else sidecar
-    if target == sidecar and not args.no_backup:
+    save_result(sidecar, new_text, out=args.out, no_backup=args.no_backup)
+
+
+def save_result(sidecar, new_text, out=None, no_backup=False):
+    """Write new_text for sidecar, backing up the original first unless
+    told not to (or unless writing to a different --out path). Used by
+    xmpwrite's own CLI and by other scripts (e.g. apply_culling_report.py)
+    that batch-update sidecars."""
+    sidecar = Path(sidecar)
+    target = Path(out) if out else sidecar
+    if target == sidecar and not no_backup:
         backup = backup_path_for(sidecar)
         shutil.copy2(sidecar, backup)
         print(f"  backup written to {backup}")
 
     xc.write_text_atomic(target, new_text)
     print(f"  wrote {target}")
+    return target
 
 
 if __name__ == "__main__":
