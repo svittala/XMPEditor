@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import glob
 import base64
@@ -12,22 +13,20 @@ from datetime import datetime
 # ==========================================
 # Ensure you have a vision-capable model pulled in Ollama, e.g., 'ollama pull llava'
 OLLAMA_MODEL = "qwen2.5vl:7b"
-# older version - llava 
+# older version - llava
 OLLAMA_URL = "http://localhost:11434/api/generate"
 BATCH_SIZE = 5
 OLLAMA_NUM_CTX = 32768  # Increased context size to avoid context limit errors
 
-# The persona and instructions for the LLM
-SYSTEM_PROMPT = """You are an expert photography judge acting as a 'culling helper'.
-I am going to provide you with a batch of images from a recent shoot.
-Your job is to go through these images and determine the 'keeps' and 'discards'.
+# The persona/instructions for the LLM live in an external text file so you
+# can run different batches with different prompts via --prompt-file.
+DEFAULT_PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "system_prompt.txt")
 
-CRITERIA:
-1. For any 'keeps', provide a category I can submit that image as a competition entry (e.g., Nature, Water, Architecture, Abstract, Flower, bird, Wildlife, Street or Cityscape, Black and White, or something similar).
-2. For any 'keeps', provide specific editing suggestions to make the image better (e.g., contrast, cropping, dehaze).
-3. For 'discards', briefly explain why (e.g., weak composition, redundant, category violation).
 
-Please output your evaluation in Markdown format. Format it with clear headers for Keeps and Discards, listing the filenames."""
+def load_system_prompt(path):
+    """Reads the system prompt text from an external file."""
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
 
 def get_base64_image(image_path):
     """Reads an image file and returns its base64 encoded string."""
@@ -82,18 +81,18 @@ def get_image_files(folder_path):
     # Sort files alphabetically to ensure consistent batching
     return sorted(list(files))
 
-def process_batch(batch_files, batch_num, folder_path, date_str):
+def process_batch(batch_files, batch_num, folder_path, date_str, system_prompt):
     """Sends a batch of images to Ollama and writes the report."""
     print(f"\nProcessing Batch {batch_num} ({len(batch_files)} images)...")
-    
+
     # 1. Prepare images and prompt
     base64_images = []
     filenames = []
     for file in batch_files:
         base64_images.append(get_base64_image(file))
         filenames.append(os.path.basename(file))
-    
-    prompt = f"{SYSTEM_PROMPT}\n\nHere are the images for this batch. The filenames in order are: {', '.join(filenames)}."
+
+    prompt = f"{system_prompt}\n\nHere are the images for this batch. The filenames in order are: {', '.join(filenames)}."
     
     # 2. Build the Ollama API payload
     payload = {
@@ -142,37 +141,53 @@ def process_batch(batch_files, batch_num, folder_path, date_str):
     print(f"Report saved to: {report_filepath}")
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Batch photo culling helper using a local Ollama vision model.")
+    parser.add_argument("folder", nargs="?",
+                         help="folder containing images to review (prompted for if omitted)")
+    parser.add_argument("--prompt-file", "-p", default=DEFAULT_PROMPT_FILE,
+                         help=f"text file with the system prompt to use "
+                              f"(default: {DEFAULT_PROMPT_FILE})")
+    args = parser.parse_args()
+
+    try:
+        system_prompt = load_system_prompt(args.prompt_file)
+    except OSError as e:
+        print(f"Error: could not read prompt file '{args.prompt_file}': {e}")
+        return
+
     if not check_ollama_ready():
         proceed = input("Ollama readiness check failed. Do you want to proceed anyway? (y/n): ")
         if proceed.lower() != 'y':
             return
-            
-    folder_path = input("Enter the folder path containing the images: ").strip()
-    
+
+    folder_path = args.folder or input("Enter the folder path containing the images: ").strip()
+
     # Strip quotes if dragged and dropped in terminal
     if folder_path.startswith('"') and folder_path.endswith('"'):
         folder_path = folder_path[1:-1]
-        
+
     if not os.path.isdir(folder_path):
         print("Error: Invalid directory path.")
         return
-        
+
     images = get_image_files(folder_path)
     if not images:
         print("No images (.jpg, .jpeg, .png) found in the specified folder.")
         return
-        
+
     total_images = len(images)
     print(f"Found {total_images} images.")
-    
+    print(f"Using prompt file: {args.prompt_file}")
+
     date_str = datetime.now().strftime("%Y-%m-%d")
-    
+
     # Split into batches
     batches = [images[i:i + BATCH_SIZE] for i in range(0, total_images, BATCH_SIZE)]
-    
+
     for i, batch in enumerate(batches, start=1):
-        process_batch(batch, i, folder_path, date_str)
-        
+        process_batch(batch, i, folder_path, date_str, system_prompt)
+
     print("\nAll batches processed successfully!")
 
 if __name__ == "__main__":
