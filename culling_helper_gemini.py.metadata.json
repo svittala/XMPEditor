@@ -1,0 +1,5 @@
+{
+  "summary": "Python script that automates the photography culling process using the Gemini API. It batches images, sends them to Gemini 1.5 Pro, and writes the markdown reports directly to the target directory.",
+  "updatedAt": "2026-09-25T22:23:36.000706400Z",
+  "userFacing": true
+}

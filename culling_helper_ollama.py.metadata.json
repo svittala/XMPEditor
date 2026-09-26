@@ -1,0 +1,5 @@
+{
+  "summary": "Python script that automates the photography culling process using a local Ollama vision model (like llava). It batches images, sends them to the local LLM with the cullinghelper persona prompt, and writes the markdown reports directly to the target directory.",
+  "updatedAt": "2026-09-25T22:18:30.397108700Z",
+  "userFacing": true
+}
