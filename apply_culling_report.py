@@ -38,8 +38,9 @@ KEEP_RATING = 2
 DISCARD_RATING = 1
 
 _SECTION_RE = re.compile(r"^#+\s*(Keeps?|Discards?)\b", re.IGNORECASE)
-_ITEM_RE = re.compile(r"^\d+\.\s*\*\*(.+?)\*\*")
+_ITEM_RE = re.compile(r"^(?:\d+\.|[-*])\s*\*\*(.+?)\*\*:?\s*(.*)$")
 _FIELD_RE = re.compile(r"^\s*-\s*\*\*(.+?)\*\*:?\s*(.*)$")
+_INLINE_CATEGORY_RE = re.compile(r"\*\*([^*]+)\*\*\s+categor", re.IGNORECASE)
 
 
 def resolve_reports(path_str):
@@ -72,11 +73,19 @@ def parse_report(text):
             section = "keep" if sec_m.group(1).lower().startswith("keep") else "discard"
             continue
 
-        item_m = _ITEM_RE.match(line.strip())
+        # Item bullets/numbers start at column 0; field sub-bullets (e.g.
+        # "  - **Category:** ...") are indented under them — match against
+        # the unstripped line so indentation still disambiguates the two.
+        item_m = _ITEM_RE.match(line)
         if item_m and section:
             flush()
             filename = item_m.group(1).strip()
             current = {"filename": filename, "status": section, "fields": {}}
+            inline = item_m.group(2).strip()
+            if inline:
+                cat_m = _INLINE_CATEGORY_RE.search(inline)
+                if cat_m:
+                    current["fields"]["category"] = cat_m.group(1).strip()
             continue
 
         field_m = _FIELD_RE.match(line)
