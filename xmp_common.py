@@ -25,15 +25,16 @@ _XPACKET_RE = re.compile(r"<\?xpacket[^?]*\?>")
 
 def resolve_sidecars(path_str):
     """Given an image path, a .xmp path, or a directory, return a list of
-    .xmp Paths to process. Returns [] if nothing could be resolved."""
+    .xmp Paths to process. Returns [] if nothing could be resolved.
+
+    The image itself need not exist on disk (e.g. a folder of .xmp sidecars
+    with no local .jpg/.CR3 copies) — only the sidecar's presence matters."""
     p = Path(path_str)
-    if not p.exists():
-        return []
     if p.is_dir():
         found = set(p.glob("*.xmp")) | set(p.glob("*.XMP"))
         return sorted(found, key=lambda f: f.name.lower())
     if p.suffix.lower() == ".xmp":
-        return [p]
+        return [p] if p.exists() else []
     for candidate in (p.with_suffix(".xmp"), p.with_suffix(".XMP")):
         if candidate.exists():
             return [candidate]
