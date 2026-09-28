@@ -52,6 +52,18 @@ def resolve_reports(path_str):
     return []
 
 
+def _clean_field(value):
+    """Return value with surrounding quotes stripped, or None if it's
+    missing/empty/a placeholder like "N/A" (older reports use this for
+    fields that don't apply, e.g. a discard's Title)."""
+    if not value:
+        return None
+    value = value.strip().strip('"').strip("'").strip()
+    if not value or value.lower() == "n/a":
+        return None
+    return value
+
+
 def parse_report(text):
     """Return a list of {filename, status, fields} dicts, status is
     'keep' or 'discard'. fields is a lowercased label -> value dict
@@ -109,6 +121,7 @@ def apply_entry(entry, images_dir, no_backup, dry_run):
     old_text = xc.read_text(sidecar)
     old_data = xc.parse_xmp(sidecar)
 
+    title = description = None
     if entry["status"] == "keep":
         rating = KEEP_RATING
         category = entry["fields"].get("category", "")
@@ -117,17 +130,24 @@ def apply_entry(entry, images_dir, no_backup, dry_run):
         for t in new_tags_list:
             if t not in tags:
                 tags.append(t)
+        title = _clean_field(entry["fields"].get("title"))
+        description = _clean_field(entry["fields"].get("description"))
     else:
         rating = DISCARD_RATING
         tags = None
 
-    new_text = xw.apply_updates(old_text, tags=tags, rating=rating)
+    new_text = xw.apply_updates(old_text, title=title, description=description,
+                                 tags=tags, rating=rating)
 
     old_rating = old_data["attrs"].get("xmp:Rating", "—")
     old_tags = ", ".join(old_data["subject"]) or "—"
     new_tags_display = ", ".join(tags) if tags is not None else old_tags
     print(f"  {filename} ({entry['status']}) -> {sidecar.name}: "
           f"rating {old_rating!r} -> {rating}, tags '{old_tags}' -> '{new_tags_display}'")
+    if title is not None:
+        print(f"    title -> {title!r}")
+    if description is not None:
+        print(f"    description -> {description!r}")
 
     if dry_run:
         return True
