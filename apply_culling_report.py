@@ -21,9 +21,15 @@ the "Folder:" path recorded in the report header, which reflects wherever
 the report was originally generated (e.g. a different machine/drive).
 
 Options:
-    --images-dir DIR   folder containing the .xmp sidecars (required)
-    --no-backup        skip writing a .bak backup before overwriting
-    --dry-run          show what would change; write nothing
+    --images-dir DIR       folder containing the .xmp sidecars (required)
+    --no-backup            skip writing a .bak backup before overwriting
+    --dry-run              show what would change; write nothing
+    --apply-develop-edits  also write the report's suggested Lightroom
+                           Develop slider values (from a "Develop
+                           Adjustments" field, e.g. "Contrast2012=+15,
+                           Dehaze=+10") into each keep's .xmp. Off by
+                           default — without this flag, develop values in
+                           a report are ignored.
 """
 
 import argparse
@@ -37,10 +43,29 @@ import xmpwrite as xw
 KEEP_RATING = 2
 DISCARD_RATING = 1
 
+# Camera Raw develop sliders the LLM is allowed to suggest values for (see
+# "Develop Adjustments" in system_prompt*.txt), and each one's valid range.
+# Anything outside this allowlist is ignored rather than written verbatim,
+# so a report can never inject an arbitrary crs: (or other) attribute.
+DEVELOP_SLIDERS = {
+    "Exposure2012": (-5, 5),
+    "Contrast2012": (-100, 100),
+    "Highlights2012": (-100, 100),
+    "Shadows2012": (-100, 100),
+    "Whites2012": (-100, 100),
+    "Blacks2012": (-100, 100),
+    "Texture": (-100, 100),
+    "Clarity2012": (-100, 100),
+    "Dehaze": (-100, 100),
+    "Vibrance": (-100, 100),
+    "Saturation": (-100, 100),
+}
+
 _SECTION_RE = re.compile(r"^#+\s*(Keeps?|Discards?)\b", re.IGNORECASE)
 _ITEM_RE = re.compile(r"^(?:\d+\.|[-*])\s*\*\*(.+?)\*\*:?\s*(.*)$")
 _FIELD_RE = re.compile(r"^\s*-\s*\*\*(.+?)\*\*:?\s*(.*)$")
 _INLINE_CATEGORY_RE = re.compile(r"\*\*([^*]+)\*\*\s+categor", re.IGNORECASE)
+_DEVELOP_PAIR_RE = re.compile(r"([A-Za-z0-9]+)\s*=\s*([+-]?[0-9]*\.?[0-9]+)")
 
 
 def resolve_reports(path_str):
@@ -62,6 +87,28 @@ def _clean_field(value):
     if not value or value.lower() == "n/a":
         return None
     return value
+
+
+def parse_develop_adjustments(s):
+    """Parse a "SliderName=value, SliderName=value" string into a dict of
+    known Camera Raw slider name -> string value, clamped to that slider's
+    valid range. Unknown slider names or unparseable values are skipped
+    (with a warning printed) rather than passed through."""
+    result = {}
+    if not s:
+        return result
+    for name, raw_value in _DEVELOP_PAIR_RE.findall(s):
+        bounds = DEVELOP_SLIDERS.get(name)
+        if bounds is None:
+            print(f"    warning: ignoring unknown develop slider {name!r}")
+            continue
+        value = float(raw_value)
+        lo, hi = bounds
+        if value < lo or value > hi:
+            print(f"    warning: clamping {name}={value} to [{lo}, {hi}]")
+            value = max(lo, min(hi, value))
+        result[name] = f"{value:.2f}" if name == "Exposure2012" else str(int(round(value)))
+    return result
 
 
 def parse_report(text):
@@ -110,7 +157,7 @@ def parse_report(text):
     return entries
 
 
-def apply_entry(entry, images_dir, no_backup, dry_run):
+def apply_entry(entry, images_dir, no_backup, dry_run, apply_develop_edits):
     filename = entry["filename"]
     sidecars = xc.resolve_sidecars(str(Path(images_dir) / filename))
     if not sidecars:
@@ -121,7 +168,7 @@ def apply_entry(entry, images_dir, no_backup, dry_run):
     old_text = xc.read_text(sidecar)
     old_data = xc.parse_xmp(sidecar)
 
-    title = description = None
+    title = description = develop = None
     if entry["status"] == "keep":
         rating = KEEP_RATING
         category = entry["fields"].get("category", "")
@@ -132,12 +179,15 @@ def apply_entry(entry, images_dir, no_backup, dry_run):
                 tags.append(t)
         title = _clean_field(entry["fields"].get("title"))
         description = _clean_field(entry["fields"].get("description"))
+        if apply_develop_edits:
+            develop = parse_develop_adjustments(
+                entry["fields"].get("develop adjustments", "")) or None
     else:
         rating = DISCARD_RATING
         tags = None
 
     new_text = xw.apply_updates(old_text, title=title, description=description,
-                                 tags=tags, rating=rating)
+                                 tags=tags, rating=rating, develop=develop)
 
     old_rating = old_data["attrs"].get("xmp:Rating", "—")
     old_tags = ", ".join(old_data["subject"]) or "—"
@@ -148,6 +198,8 @@ def apply_entry(entry, images_dir, no_backup, dry_run):
         print(f"    title -> {title!r}")
     if description is not None:
         print(f"    description -> {description!r}")
+    if develop:
+        print(f"    develop -> {develop}")
 
     if dry_run:
         return True
@@ -167,6 +219,11 @@ def main():
                          help="don't write a .bak backup before overwriting")
     parser.add_argument("--dry-run", action="store_true",
                          help="show the changes without writing anything")
+    parser.add_argument("--apply-develop-edits", action="store_true",
+                         help="also apply the report's suggested Lightroom "
+                              "Develop slider adjustments (Contrast, "
+                              "Highlights, Dehaze, etc.) to each keep's "
+                              ".xmp; off by default")
     args = parser.parse_args()
 
     report_files = []
@@ -188,7 +245,8 @@ def main():
             print("  (no Keep/Discard entries found)")
             continue
         for entry in entries:
-            if apply_entry(entry, args.images_dir, args.no_backup, args.dry_run):
+            if apply_entry(entry, args.images_dir, args.no_backup, args.dry_run,
+                            args.apply_develop_edits):
                 updated += 1
             else:
                 skipped += 1

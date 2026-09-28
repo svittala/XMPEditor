@@ -29,6 +29,15 @@ CRITERIA:
      dc:description)
    Keep these concise and free of markdown formatting inside the values
    themselves (no bold, no quotes around the text).
+6. For any 'keeps', also suggest concrete Lightroom Develop slider values as
+   an enhancement to the image (e.g. "increase contrast" becomes a specific
+   Contrast2012 value). Use ONLY these exact slider names, and give each as
+   an absolute value the slider should be SET to (not a relative change):
+   Exposure2012 (-5 to 5), Contrast2012, Highlights2012, Shadows2012,
+   Whites2012, Blacks2012, Texture, Clarity2012, Dehaze, Vibrance,
+   Saturation (all -100 to 100). Only include sliders you're actually
+   recommending changing; omit the rest. Format as comma-separated
+   SliderName=value pairs, e.g. "Contrast2012=15, Dehaze=10".
 
 OUTPUT FORMAT (follow exactly, every time, for consistent parsing):
 Output your evaluation in Markdown with two top-level headers, "# Keeps" and
@@ -41,6 +50,7 @@ every entry, with no inline prose and no deviation:
    - **Editing Suggestions:** specific suggestion text
    - **Title:** Short descriptive title
    - **Description:** One or two sentence description
+   - **Develop Adjustments:** SliderName=value, SliderName=value
 
 # Discards
 1. **filename.jpg**

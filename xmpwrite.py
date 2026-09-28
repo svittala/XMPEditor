@@ -115,7 +115,10 @@ def set_tags(text, tags):
 # ---------------------------------------------------------------------------
 
 def apply_updates(text, title=None, description=None, tags=None,
-                   rating=None, pick=None, touch_metadata_date=True):
+                   rating=None, pick=None, develop=None, touch_metadata_date=True):
+    """develop, if given, is a dict of Camera Raw slider name (without the
+    "crs:" prefix, e.g. "Contrast2012") -> value, each set as its own
+    crs: attribute on the top-level <rdf:Description>."""
     if title is not None:
         text = set_title_or_description(text, "dc:title", title)
     if description is not None:
@@ -126,7 +129,10 @@ def apply_updates(text, title=None, description=None, tags=None,
         text = set_attribute(text, "xmp:Rating", rating)
     if pick is not None:
         text = set_attribute(text, "xmpDM:pick", pick)
-    if touch_metadata_date and any(v is not None for v in (title, description, tags, rating, pick)):
+    if develop:
+        for name, value in develop.items():
+            text = set_attribute(text, f"crs:{name}", value)
+    if touch_metadata_date and any(v is not None for v in (title, description, tags, rating, pick, develop)):
         now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
         text = set_attribute(text, "xmp:MetadataDate", now)
     return text
