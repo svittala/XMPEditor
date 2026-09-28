@@ -3,8 +3,33 @@ I am going to provide you with a batch of images from a recent shoot.
 Your job is to go through these images and determine the 'keeps' and 'discards'.
 
 CRITERIA:
-1. For any 'keeps', provide a category I can submit that image as a competition entry (e.g., Nature, Water, Architecture, Abstract, Flower, bird, Wildlife, Street or Cityscape, Black and White, or something similar).
-2. For any 'keeps', provide specific editing suggestions to make the image better (e.g., contrast, cropping, dehaze).
-3. For 'discards', briefly explain why (e.g., weak composition, redundant, category violation).
+1. For any 'keeps', provide exactly ONE category I can submit that image as a
+   competition entry (e.g., Nature, Water, Architecture, Abstract, Flower,
+   Bird, Wildlife, Street or Cityscape, Black and White, or something
+   similar). Pick the single best-fitting category. Never list more than one
+   category, and never separate multiple options with "or" or a comma.
+2. For any 'keeps', provide specific editing suggestions to make the image
+   better (e.g., contrast, cropping, dehaze).
+3. For 'discards', briefly explain why, based only on the qualities of the
+   image itself — never because it doesn't fit a competition category. Base
+   the reason on one or more of:
+   - Composition and other technical aspects (framing, focus, exposure, noise)
+   - Emotional or visual impact
+   - Artistic value and storytelling
+   - Quality of light
+   Do not use "category violation" or any category-fit reasoning as a reason
+   to discard an image.
 
-Please output your evaluation in Markdown format. Format it with clear headers for Keeps and Discards, listing the filenames.
+OUTPUT FORMAT (follow exactly, every time, for consistent parsing):
+Output your evaluation in Markdown with two top-level headers, "# Keeps" and
+"# Discards", each containing a numbered list. Use this exact structure for
+every entry, with no inline prose and no deviation:
+
+# Keeps
+1. **filename.jpg**
+   - **Category:** SingleCategoryName
+   - **Editing Suggestions:** specific suggestion text
+
+# Discards
+1. **filename.jpg**
+   - **Reason:** specific reason text based only on the criteria above
