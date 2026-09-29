@@ -102,6 +102,54 @@ Unlike the core tools above, this feature has third-party dependencies and
 needs a running [Ollama](https://ollama.com). It is isolated under `search/`
 and the vector store it builds (`chroma_db/`) is gitignored.
 
+### Architecture
+
+```
+        ┌──────────────────────┐        ┌───────────────────────────────┐
+        │  testresults/*.md     │        │  Ollama  (localhost:11434)    │
+        │  culling reports      │        │  ┌─────────────┐ ┌──────────┐ │
+        └──────────┬───────────┘        │  │nomic-embed- │ │ llama3.1 │ │
+                   │                     │  │text (embed) │ │  (chat)  │ │
+    parse_report() │ (reused, no         │  └──────▲──────┘ └────▲─────┘ │
+    resolve_reports│  new markdown        └─────────┼─────────────┼───────┘
+    _clean_field   │  parsing)                      │ embeddings   │ RAG answers
+                   ▼                                │              │
+        ┌──────────────────────┐  one doc/kept img │              │
+        │  build_index.py       ├───────────────────┘              │
+        │  (ingest / indexing)  │                                  │
+        └──────────┬───────────┘                                  │
+                   │ add_documents(ids=report:filename)            │
+                   ▼                                               │
+        ┌──────────────────────┐                                  │
+        │  chroma_db/  (Chroma  │◄───── similarity_search ─────────┤
+        │  persistent vectors)  │       (+ category filter)        │
+        └──────────┬───────────┘                                  │
+                   │  vectorstore + helpers                        │
+                   ▼                                               │
+        ┌──────────────────────┐                                  │
+        │  search_core.py       │  semantic_search / list_          │
+        │  (shared retrieval)   │  categories / answer_question ────┘
+        └──────────┬───────────┘
+                   │ imported by
+                   ▼
+        ┌──────────────────────┐
+        │  app.py (Streamlit)   │   🔎 Search tab  →  ranked cards
+        │  localhost:8501       │   💬 Ask tab     →  RAG chat + cited sources
+        └──────────────────────┘
+```
+
+### Modules
+
+| File | Role |
+|---|---|
+| `search/build_index.py` | Ingestion. Reuses `apply_culling_report.parse_report` (and `resolve_reports`, `_clean_field`) to turn each **kept** image into one Chroma document — no separate markdown parsing. Stable id `report:filename` so re-runs upsert. CLI: `--reports`, `--db`, `--rebuild`. |
+| `search/search_core.py` | Shared, UI-free retrieval layer: `get_vectorstore`, `semantic_search` (with optional category filter), `list_categories`, and `answer_question` (RAG chain over `ChatOllama`). Model/path constants overridable via env vars. Imported by both `build_index.py` and `app.py` so config stays in one place. |
+| `search/app.py` | Streamlit UI. **Search** tab runs `semantic_search`; **Ask** tab runs `answer_question` and lists the source images that grounded the answer. Sidebar: category filter, top-k, DB path, chat model. |
+| `requirements-search.txt` | The feature's pip dependencies (`langchain`, `langchain-chroma`, `langchain-ollama`, `chromadb`, `streamlit`). Kept separate so the core XMP tools remain stdlib-only. |
+
+Reused unchanged from the repo root: `apply_culling_report.py` (the report
+parser) and `xmp_common.read_text`.
+
 ### One-time setup
 
 ```
