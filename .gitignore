@@ -3,3 +3,6 @@ __pycache__/
 *.bak
 *.tmp
 .DS_Store
+
+# Semantic search tool: local Chroma vector store (rebuilt from reports)
+chroma_db/

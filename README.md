@@ -89,3 +89,58 @@ python3 xmpwrite.py OV7A2905/OV7A2905.CR3 \
   commit to it.
 
 After writing, run `xmpread.py` on the same file to confirm the change.
+
+## Semantic search over culling reports (`search/`)
+
+The `culling_helper_*.py` scripts produce Markdown reports (see `testresults/`)
+that list kept images with a Category, Title, Description, and Editing
+Suggestions. When you have hundreds of these, `search/` lets you find the right
+image by meaning — either a ranked search or a natural-language chat — all
+locally via Ollama.
+
+Unlike the core tools above, this feature has third-party dependencies and
+needs a running [Ollama](https://ollama.com). It is isolated under `search/`
+and the vector store it builds (`chroma_db/`) is gitignored.
+
+### One-time setup
+
+```
+pip install -r requirements-search.txt
+ollama pull nomic-embed-text     # embeddings
+ollama pull llama3.1             # chat / RAG model
+```
+
+Ollama must be running at `http://localhost:11434` (the same instance the
+culling helpers use).
+
+### 1. Build the index
+
+Each **kept** image becomes one searchable record (filename + category + title
++ description + editing suggestions). The existing report parser is reused, so
+what gets indexed is exactly what the helpers wrote.
+
+```
+python3 search/build_index.py --reports testresults --rebuild
+```
+
+`--reports` takes a report file or a directory (repeatable); `--rebuild` clears
+the collection first. Re-running without `--rebuild` upserts by a stable id
+(`report:filename`), so growing the report set never creates duplicates.
+
+### 2. Search
+
+```
+streamlit run search/app.py        # opens http://localhost:8501
+```
+
+- **Search tab** — type a query (e.g. "serene fjord with towering cliffs") and
+  get ranked cards showing filename, description, and editing suggestions.
+- **Ask tab** — ask a question (e.g. "which nature images need more contrast?")
+  and the local LLM answers over the retrieved images, citing them by filename.
+- The sidebar has a category filter, a top-k slider, and lets you point at a
+  different Chroma path or chat model.
+
+Models and paths can be overridden with the `XMP_SEARCH_EMBED_MODEL`,
+`XMP_SEARCH_CHAT_MODEL`, and `XMP_SEARCH_DB` environment variables (see
+`search/search_core.py`). Note the culling helper's `qwen2.5vl:7b` is a vision
+model; RAG chat uses a text model (`llama3.1` by default).

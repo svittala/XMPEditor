@@ -1,0 +1,14 @@
+# Dependencies for the culling-report semantic search tool (search/).
+# The core XMP tools (xmpread/xmpwrite/xmp_common/apply_culling_report) stay
+# stdlib-only; these are needed ONLY for the search feature.
+#
+#   pip install -r requirements-search.txt
+#
+# Also requires a running Ollama (http://localhost:11434) with:
+#   ollama pull nomic-embed-text
+#   ollama pull llama3.1
+langchain>=0.3
+langchain-chroma>=0.1.4
+langchain-ollama>=0.2
+chromadb>=0.5
+streamlit>=1.36
