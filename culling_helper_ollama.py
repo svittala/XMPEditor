@@ -95,13 +95,17 @@ IMAGE_RESULT_SCHEMA = {
     "type": "object",
     "properties": {
         "keep": {"type": "boolean"},
+        "portfolio_ready": {"type": "boolean"},
+        "technical_score": {"type": "integer", "minimum": 1, "maximum": 5},
+        "composition_score": {"type": "integer", "minimum": 1, "maximum": 5},
+        "artistic_score": {"type": "integer", "minimum": 1, "maximum": 5},
         "category": {"type": "string"},
         "title": {"type": "string"},
         "description": {"type": "string"},
         "editing_suggestions": {"type": "string"},
         "reason": {"type": "string"},
     },
-    "required": ["keep"],
+    "required": ["keep", "technical_score", "composition_score", "artistic_score"],
 }
 
 
@@ -111,16 +115,9 @@ def analyze_image(image_path, system_prompt):
     Each call is fully independent: /api/generate keeps no state between requests
     (we never pass `context` back), so nothing from a previous image can leak in.
     """
-    prompt = (
-        f"{system_prompt}\n\n"
-        "Analyze ONLY the single image provided. Respond as JSON with these keys: "
-        "keep (true/false); if keep is true also set category, title, description, "
-        "editing_suggestions; if keep is false set reason. Leave unused fields empty."
-    )
-
     payload = {
         "model": OLLAMA_MODEL,
-        "prompt": prompt,
+        "prompt": system_prompt,
         "images": [get_base64_image(image_path)],
         "stream": False,
         "format": IMAGE_RESULT_SCHEMA,
@@ -158,22 +155,36 @@ def analyze_image(image_path, system_prompt):
 
 def render_report(results, batch_num, folder_path, date_str, filenames):
     """Builds the Keeps/Discards markdown report from per-image verdicts."""
+    def score_line(verdict):
+        def s(key):
+            val = verdict.get(key)
+            return val if isinstance(val, int) else "?"
+        return (
+            f"   - **Score:** Technical: {s('technical_score')}/5, "
+            f"Composition: {s('composition_score')}/5, "
+            f"Artistic: {s('artistic_score')}/5\n"
+        )
+
     keeps, discards = [], []
     for filename, verdict in results:
         if verdict is None:
             discards.append(f"1. **{filename}**\n   - **Reason:** analysis failed (no valid response)\n")
         elif verdict.get("keep"):
+            status = "Portfolio-ready" if verdict.get("portfolio_ready") else "Needs edits"
             keeps.append(
                 f"1. **{filename}**\n"
+                + score_line(verdict)
+                + f"   - **Status:** {status}\n"
                 f"   - **Category:** {verdict.get('category', '').strip() or 'Uncategorized'}\n"
                 f"   - **Title:** {verdict.get('title', '').strip()}\n"
                 f"   - **Description:** {verdict.get('description', '').strip()}\n"
-                f"   - **Editing Suggestions:** {verdict.get('editing_suggestions', '').strip()}\n"
+                f"   - **Suggested Edits:** {verdict.get('editing_suggestions', '').strip() or 'None'}\n"
             )
         else:
             discards.append(
                 f"1. **{filename}**\n"
-                f"   - **Reason:** {verdict.get('reason', '').strip() or 'No reason given'}\n"
+                + score_line(verdict)
+                + f"   - **Reason:** {verdict.get('reason', '').strip() or 'No reason given'}\n"
             )
 
     header = f"# Photography Culling Report - Batch {batch_num}\n"
