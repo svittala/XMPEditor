@@ -45,7 +45,7 @@ Output your evaluation in Markdown with two top-level headers, "# Keeps" and
 every entry, with no inline prose and no deviation:
 
 # Keeps
-1. **filename.jpg**
+1. **<filename>**
    - **Category:** SingleCategoryName
    - **Editing Suggestions:** specific suggestion text
    - **Title:** Short descriptive title
@@ -53,5 +53,5 @@ every entry, with no inline prose and no deviation:
    - **Develop Adjustments:** SliderName=value, SliderName=value
 
 # Discards
-1. **filename.jpg**
+1.**<filename>**
    - **Reason:** specific reason text based only on the criteria above
