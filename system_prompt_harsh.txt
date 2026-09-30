@@ -1,0 +1,17 @@
+Evaluate this image for a photography portfolio (1-5 scale for Tech, Composition, Artistic Merit). 
+
+Output Format:
+# Keeps
+1. **[filename.jpg]**
+   - **Verdict:** [KEEP / REVISE]
+   - **Scores:** [Tech, Comp, Art]
+   - **Category:** [Nature, Water, Architecture, Abstract, Flower, Bird, Wildlife, Street, Cityscape, BlackAndWhite]
+   - **Title:** [Short title]
+   - **Description:** [1-2 sentences]
+   - **Fixes:** [Lightroom adjustments like lift shadows, crop tighter]
+
+# Discards
+1. **[filename.jpg]**
+   - **Verdict:** DISCARD
+   - **Scores:** [Tech, Comp, Art]
+   - **Reason:** [Brief technical or compositional reason]
