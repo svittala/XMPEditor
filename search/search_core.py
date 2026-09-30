@@ -37,11 +37,21 @@ OLLAMA_BASE_URL = (
 _RAG_SYSTEM = (
     "You are a photo-culling assistant. Answer the user's question using ONLY "
     "the retrieved image entries below. Each entry has a filename, category, "
-    "title, description, and editing suggestions. Cite every image you refer "
-    "to by its exact filename. If nothing relevant was retrieved, say so "
-    "plainly instead of guessing.\n\n"
+    "title, status (portfolio-ready or needs edits), 1-5 scores (technical, "
+    "composition, artistic), description, and suggested edits. Cite every image "
+    "you refer to by its exact filename. If nothing relevant was retrieved, say "
+    "so plainly instead of guessing.\n\n"
     "Retrieved images:\n{context}"
 )
+
+
+def _scores_str(m):
+    """Render the three scores from a document's metadata, or '' if absent."""
+    t, c, a = (m.get("technical_score"), m.get("composition_score"),
+               m.get("artistic_score"))
+    if t is None and c is None and a is None:
+        return ""
+    return f"technical {t}/5, composition {c}/5, artistic {a}/5"
 
 
 def get_embeddings():
@@ -90,8 +100,10 @@ def _format_context(docs):
             f"- filename: {m.get('filename', '?')}\n"
             f"  category: {m.get('category', '')}\n"
             f"  title: {m.get('title', '')}\n"
+            f"  status: {m.get('status', '')}\n"
+            f"  scores: {_scores_str(m)}\n"
             f"  description: {m.get('description', '')}\n"
-            f"  editing suggestions: {m.get('editing_suggestions', '')}"
+            f"  suggested edits: {m.get('editing_suggestions', '')}"
         )
     return "\n".join(blocks) if blocks else "(no images retrieved)"
 

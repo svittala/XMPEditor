@@ -37,6 +37,7 @@ import xmp_common as xc  # noqa: E402
 from apply_culling_report import (  # noqa: E402
     resolve_reports,
     parse_report,
+    parse_scores,
     _clean_field,
 )
 
@@ -88,14 +89,25 @@ def build_documents(report_path):
         title = _clean_field(fields.get("title")) or ""
         category = _clean_field(fields.get("category")) or ""
         description = _clean_field(fields.get("description")) or ""
-        edits = _clean_field(fields.get("editing suggestions")) or ""
+        # New reports label this "Suggested Edits"; older ones "Editing
+        # Suggestions" — accept either so both formats index the same field.
+        edits = (_clean_field(fields.get("suggested edits"))
+                 or _clean_field(fields.get("editing suggestions")) or "")
+        status = _clean_field(fields.get("status")) or ""
+        scores = parse_scores(fields.get("score"))
+        score_text = (
+            f"technical {scores[0]}/5, composition {scores[1]}/5, "
+            f"artistic {scores[2]}/5" if scores else ""
+        )
 
         # The embedded text: the semantically rich fields, labeled.
         page_content = (
             f"Title: {title}\n"
             f"Category: {category}\n"
+            f"Status: {status}\n"
+            f"Scores: {score_text}\n"
             f"Description: {description}\n"
-            f"Editing suggestions: {edits}"
+            f"Suggested edits: {edits}"
         )
         metadata = {
             "filename": filename,
@@ -103,10 +115,17 @@ def build_documents(report_path):
             "category": category,
             "description": description,
             "editing_suggestions": edits,
+            "status": status,
             "report_file": report_path.name,
             "batch": header["batch"],
             "folder": header["folder"],
         }
+        # Only store scores when present (older reports have none), and as ints
+        # so the UI/filters can use them numerically.
+        if scores:
+            metadata["technical_score"] = scores[0]
+            metadata["composition_score"] = scores[1]
+            metadata["artistic_score"] = scores[2]
         docs.append(Document(page_content=page_content, metadata=metadata))
         # Stable id -> re-running upserts the same image instead of duplicating.
         ids.append(f"{report_path.stem}:{filename}")

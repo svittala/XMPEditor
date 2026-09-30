@@ -4,7 +4,7 @@ app.py — Streamlit UI for searching culling reports.
 
 Two tabs:
   - Search: semantic search over kept images; ranked cards with filename,
-    description, and editing suggestions.
+    status, 1-5 scores, description, and suggested edits.
   - Ask:    conversational RAG; the local Ollama LLM answers questions over the
     retrieved images and cites them by filename.
 
@@ -41,20 +41,33 @@ def cached_categories(db_path):
         return []
 
 
+def _scores_str(meta):
+    t, c, a = (meta.get("technical_score"), meta.get("composition_score"),
+               meta.get("artistic_score"))
+    if t is None and c is None and a is None:
+        return ""
+    return f"Technical {t}/5 · Composition {c}/5 · Artistic {a}/5"
+
+
 def render_card(meta, score=None):
     filename = meta.get("filename", "?")
     header = f"**{filename}**"
     if meta.get("category"):
         header += f"  ·  _{meta['category']}_"
+    if meta.get("status"):
+        header += f"  ·  {meta['status']}"
     if score is not None:
         header += f"  ·  distance `{score:.3f}`"
     st.markdown(header)
     if meta.get("title"):
         st.markdown(f"**{meta['title']}**")
+    scores = _scores_str(meta)
+    if scores:
+        st.caption(scores)
     if meta.get("description"):
         st.write(meta["description"])
     if meta.get("editing_suggestions"):
-        st.markdown(f"**Editing suggestions:** {meta['editing_suggestions']}")
+        st.markdown(f"**Suggested edits:** {meta['editing_suggestions']}")
     src = meta.get("report_file", "")
     if src:
         st.caption(f"from {src}")

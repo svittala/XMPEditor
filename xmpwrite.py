@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-xmpwrite.py — update Title, Description, Tags, Rating, and Pick in an Adobe
-XMP sidecar file, in place.
+xmpwrite.py — update Title, Description, Tags, Rating, Pick, Label, and
+Instructions in an Adobe XMP sidecar file, in place.
 
 Edits are made as surgical text patches (not a full XML re-serialization), so
 every other field in the file — all the Camera Raw "crs:" develop settings,
@@ -17,6 +17,8 @@ Options:
     --add-tags "a,b,c"      Merge into existing dc:subject (no duplicates)
     --rating {0,1,2,3,4,5}  Set xmp:Rating
     --pick {-1,0,1}         Set xmpDM:pick (-1 reject, 0 unflagged, 1 pick)
+    --label COLOR           Set xmp:Label (Red, Yellow, Green, Blue, Purple)
+    --instructions TEXT     Set photoshop:Instructions (notes / edit instructions)
     --out FILE              Write the result to FILE instead of overwriting PATH
     --no-backup             Skip writing a PATH.bak backup before overwriting
     --dry-run               Show what would change; write nothing
@@ -115,10 +117,14 @@ def set_tags(text, tags):
 # ---------------------------------------------------------------------------
 
 def apply_updates(text, title=None, description=None, tags=None,
-                   rating=None, pick=None, develop=None, touch_metadata_date=True):
+                   rating=None, pick=None, develop=None, label=None,
+                   instructions=None, touch_metadata_date=True):
     """develop, if given, is a dict of Camera Raw slider name (without the
     "crs:" prefix, e.g. "Contrast2012") -> value, each set as its own
-    crs: attribute on the top-level <rdf:Description>."""
+    crs: attribute on the top-level <rdf:Description>.
+
+    label sets xmp:Label (Lightroom color label, e.g. "Green"); instructions
+    sets photoshop:Instructions (the IPTC special-instructions field)."""
     if title is not None:
         text = set_title_or_description(text, "dc:title", title)
     if description is not None:
@@ -129,10 +135,14 @@ def apply_updates(text, title=None, description=None, tags=None,
         text = set_attribute(text, "xmp:Rating", rating)
     if pick is not None:
         text = set_attribute(text, "xmpDM:pick", pick)
+    if label is not None:
+        text = set_attribute(text, "xmp:Label", label)
+    if instructions is not None:
+        text = set_attribute(text, "photoshop:Instructions", instructions)
     if develop:
         for name, value in develop.items():
             text = set_attribute(text, f"crs:{name}", value)
-    if touch_metadata_date and any(v is not None for v in (title, description, tags, rating, pick, develop)):
+    if touch_metadata_date and any(v is not None for v in (title, description, tags, rating, pick, develop, label, instructions)):
         now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
         text = set_attribute(text, "xmp:MetadataDate", now)
     return text
@@ -165,6 +175,10 @@ def main():
                          help="merge these keywords into the existing set")
     parser.add_argument("--rating", type=int, choices=[0, 1, 2, 3, 4, 5])
     parser.add_argument("--pick", type=int, choices=[-1, 0, 1])
+    parser.add_argument("--label", metavar="COLOR",
+                         help="set xmp:Label (e.g. Red, Yellow, Green, Blue, Purple)")
+    parser.add_argument("--instructions", metavar="TEXT",
+                         help="set photoshop:Instructions (special instructions / notes)")
     parser.add_argument("--out", metavar="FILE",
                          help="write result to FILE instead of overwriting PATH")
     parser.add_argument("--no-backup", action="store_true",
@@ -184,9 +198,10 @@ def main():
     sidecar = sidecars[0]
 
     if all(v is None for v in (args.title, args.description, args.tags,
-                                args.add_tags, args.rating, args.pick)):
+                                args.add_tags, args.rating, args.pick,
+                                args.label, args.instructions)):
         print("error: no changes requested (use --title/--description/--tags/"
-              "--add-tags/--rating/--pick)", file=sys.stderr)
+              "--add-tags/--rating/--pick/--label/--instructions)", file=sys.stderr)
         sys.exit(1)
 
     old_text = xc.read_text(sidecar)
@@ -210,6 +225,8 @@ def main():
         tags=tags,
         rating=args.rating,
         pick=args.pick,
+        label=args.label,
+        instructions=args.instructions,
     )
 
     changes = []
@@ -223,6 +240,10 @@ def main():
         changes.append(("Rating", old_data["attrs"].get("xmp:Rating", "—"), args.rating))
     if args.pick is not None:
         changes.append(("Pick", old_data["attrs"].get("xmpDM:pick", "—"), args.pick))
+    if args.label is not None:
+        changes.append(("Label", old_data["attrs"].get("xmp:Label", "—"), args.label))
+    if args.instructions is not None:
+        changes.append(("Instructions", old_data["attrs"].get("photoshop:Instructions", "—"), args.instructions))
 
     print(f"{sidecar}:")
     for label, before, after in changes:

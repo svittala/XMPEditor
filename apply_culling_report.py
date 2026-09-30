@@ -4,12 +4,19 @@ apply_culling_report.py — apply a culling_helper_*.py markdown report to the
 corresponding .xmp sidecars.
 
 For each image listed in a report:
-  - Keep  -> add the report's Category as a keyword tag, set xmp:Rating = 2
-  - Discard -> set xmp:Rating = 1 (no tag; discards have no Category)
+  - Keep  -> merge the Category and the three scores (as "Tech:N"/"Comp:N"/
+             "Art:N" keywords) into dc:subject; set xmp:Rating from the scores
+             (all three >=4 -> 3 stars, exactly two >=4 -> 2, else 1); set
+             xmp:Label (Portfolio-ready -> Green, Needs edits -> Yellow); write
+             Title, Description, and the Suggested Edits into
+             photoshop:Instructions.
+  - Discard -> set xmp:Rating = 0 and xmp:Label = Red; still record the score
+             keywords and the Reason (into photoshop:Instructions).
 
-Existing tags are preserved (the Category is merged in, like xmpwrite's
---add-tags), and every other field in the .xmp (Camera Raw develop settings,
-etc.) is left untouched, same as xmpwrite.py.
+Existing tags are preserved (Category/scores are merged in, like xmpwrite's
+--add-tags; stale Tech:/Comp:/Art: keywords are refreshed in place), and every
+other field in the .xmp (Camera Raw develop settings, etc.) is left untouched,
+same as xmpwrite.py.
 
 Usage:
     python3 apply_culling_report.py REPORT [REPORT ...] --images-dir DIR [options]
@@ -40,8 +47,16 @@ from pathlib import Path
 import xmp_common as xc
 import xmpwrite as xw
 
-KEEP_RATING = 2
-DISCARD_RATING = 1
+DISCARD_RATING = 0
+
+# Status text (from the report's "Status" field) -> Lightroom color label.
+KEEP_LABELS = {"portfolio-ready": "Green", "needs edits": "Yellow"}
+DISCARD_LABEL = "Red"
+
+# Keyword prefixes used to store the three 1-5 scores, e.g. "Tech:4". Existing
+# keywords with these prefixes are stripped before re-adding so re-running a
+# report updates the scores in place instead of accumulating stale pairs.
+SCORE_KEYWORD_PREFIXES = ("Tech:", "Comp:", "Art:")
 
 # Camera Raw develop sliders the LLM is allowed to suggest values for (see
 # "Develop Adjustments" in system_prompt*.txt), and each one's valid range.
@@ -66,6 +81,12 @@ _ITEM_RE = re.compile(r"^(?:\d+\.|[-*])\s*\*\*(.+?)\*\*:?\s*(.*)$")
 _FIELD_RE = re.compile(r"^\s*-\s*\*\*(.+?)\*\*:?\s*(.*)$")
 _INLINE_CATEGORY_RE = re.compile(r"\*\*([^*]+)\*\*\s+categor", re.IGNORECASE)
 _DEVELOP_PAIR_RE = re.compile(r"([A-Za-z0-9]+)\s*=\s*([+-]?[0-9]*\.?[0-9]+)")
+# Pulls the three 1-5 scores out of a Score field value like
+# "Technical: 4/5, Composition: 3/5, Artistic: 3/5".
+_SCORE_RE = re.compile(
+    r"technical\s*:\s*(\d+).*?composition\s*:\s*(\d+).*?artistic\s*:\s*(\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def resolve_reports(path_str):
@@ -109,6 +130,52 @@ def parse_develop_adjustments(s):
             value = max(lo, min(hi, value))
         result[name] = f"{value:.2f}" if name == "Exposure2012" else str(int(round(value)))
     return result
+
+
+def parse_scores(s):
+    """Parse a Score field value into (technical, composition, artistic) ints,
+    or None if it can't be read (e.g. an older report with no Score line)."""
+    if not s:
+        return None
+    m = _SCORE_RE.search(s)
+    if not m:
+        return None
+    return tuple(int(g) for g in m.groups())
+
+
+def rating_from_scores(scores):
+    """Map the three scores to a star rating: all three >=4 -> 3 stars,
+    exactly two >=4 -> 2 stars, otherwise 1 star. A keep with no parseable
+    scores counts as zero >=4, i.e. 1 star."""
+    n = sum(1 for s in (scores or ()) if s >= 4)
+    if n == 3:
+        return 3
+    if n == 2:
+        return 2
+    return 1
+
+
+def score_keywords(scores):
+    """Turn (t, c, a) into ["Tech:t", "Comp:c", "Art:a"]."""
+    if not scores:
+        return []
+    t, c, a = scores
+    return [f"Tech:{t}", f"Comp:{c}", f"Art:{a}"]
+
+
+def strip_score_keywords(tags):
+    """Drop any existing Tech:/Comp:/Art: keywords so re-running a report
+    updates the scores in place rather than piling up stale values."""
+    return [t for t in tags if not t.startswith(SCORE_KEYWORD_PREFIXES)]
+
+
+def label_for(status, status_field):
+    """Lightroom color label: discards are Red; keeps are Green when the
+    report's Status is "Portfolio-ready", else Yellow."""
+    if status == "discard":
+        return DISCARD_LABEL
+    key = (status_field or "").strip().lower()
+    return KEEP_LABELS.get(key, "Yellow")
 
 
 def parse_report(text):
@@ -168,36 +235,50 @@ def apply_entry(entry, images_dir, no_backup, dry_run, apply_develop_edits):
     old_text = xc.read_text(sidecar)
     old_data = xc.parse_xmp(sidecar)
 
+    scores = parse_scores(entry["fields"].get("score"))
+    label = label_for(entry["status"], entry["fields"].get("status"))
+
+    # Start from existing keywords minus any stale score keywords, then add
+    # the fresh scores (for keeps and discards alike, so nothing is lost).
+    tags = strip_score_keywords(list(old_data["subject"]))
+    for t in score_keywords(scores):
+        if t not in tags:
+            tags.append(t)
+
     title = description = develop = None
     if entry["status"] == "keep":
-        rating = KEEP_RATING
+        rating = rating_from_scores(scores)
         category = entry["fields"].get("category", "")
-        new_tags_list = xw.parse_tag_list(category) if category else []
-        tags = list(old_data["subject"])
-        for t in new_tags_list:
+        for t in (xw.parse_tag_list(category) if category else []):
             if t not in tags:
                 tags.append(t)
         title = _clean_field(entry["fields"].get("title"))
         description = _clean_field(entry["fields"].get("description"))
+        instructions = _clean_field(entry["fields"].get("suggested edits"))
         if apply_develop_edits:
             develop = parse_develop_adjustments(
                 entry["fields"].get("develop adjustments", "")) or None
     else:
         rating = DISCARD_RATING
-        tags = None
+        instructions = _clean_field(entry["fields"].get("reason"))
 
     new_text = xw.apply_updates(old_text, title=title, description=description,
-                                 tags=tags, rating=rating, develop=develop)
+                                 tags=tags, rating=rating, develop=develop,
+                                 label=label, instructions=instructions)
 
     old_rating = old_data["attrs"].get("xmp:Rating", "—")
+    old_label = old_data["attrs"].get("xmp:Label", "—")
     old_tags = ", ".join(old_data["subject"]) or "—"
     new_tags_display = ", ".join(tags) if tags is not None else old_tags
     print(f"  {filename} ({entry['status']}) -> {sidecar.name}: "
-          f"rating {old_rating!r} -> {rating}, tags '{old_tags}' -> '{new_tags_display}'")
+          f"rating {old_rating!r} -> {rating}, label {old_label!r} -> {label!r}, "
+          f"tags '{old_tags}' -> '{new_tags_display}'")
     if title is not None:
         print(f"    title -> {title!r}")
     if description is not None:
         print(f"    description -> {description!r}")
+    if instructions is not None:
+        print(f"    instructions -> {instructions!r}")
     if develop:
         print(f"    develop -> {develop}")
 
