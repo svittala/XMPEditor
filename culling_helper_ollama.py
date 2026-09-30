@@ -6,6 +6,7 @@ import base64
 import json
 import urllib.request
 import urllib.error
+import concurrent.futures
 from datetime import datetime
 
 # ==========================================
@@ -15,8 +16,14 @@ from datetime import datetime
 OLLAMA_MODEL = "qwen2.5vl:7b"
 # older version - llava
 OLLAMA_URL = "http://localhost:11434/api/generate"
-BATCH_SIZE = 5
-OLLAMA_NUM_CTX = 32768  # Increased context size to avoid context limit errors
+BATCH_SIZE = 10  # Images per markdown report
+# On 8GB RAM a 7B vision model fits only one inference at a time, so keep this
+# low: extra workers just overlap encoding/setup, they don't run models in
+# parallel. 2 is a safe default; raise via --workers only if you have headroom.
+MAX_WORKERS = 2
+# One image per request now, so we need far less context than a 5-image batch.
+# Smaller context = less memory pressure, which matters on 8GB.
+OLLAMA_NUM_CTX = 8192
 
 # The persona/instructions for the LLM live in an external text file so you
 # can run different batches with different prompts via --prompt-file.
@@ -81,63 +88,134 @@ def get_image_files(folder_path):
     # Sort files alphabetically to ensure consistent batching
     return sorted(list(files))
 
-def process_batch(batch_files, batch_num, folder_path, date_str, system_prompt):
-    """Sends a batch of images to Ollama and writes the report."""
-    print(f"\nProcessing Batch {batch_num} ({len(batch_files)} images)...")
+# JSON schema forcing a single, self-contained verdict per image. Sending one
+# image per request (below) is what actually prevents cross-image bleed; the
+# schema just keeps the output structured so we can merge it ourselves.
+IMAGE_RESULT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "keep": {"type": "boolean"},
+        "category": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "editing_suggestions": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["keep"],
+}
 
-    # 1. Prepare images and prompt
-    base64_images = []
-    filenames = []
-    for file in batch_files:
-        base64_images.append(get_base64_image(file))
-        filenames.append(os.path.basename(file))
 
-    prompt = f"{system_prompt}\n\nHere are the images for this batch. The filenames in order are: {', '.join(filenames)}."
-    
-    # 2. Build the Ollama API payload
+def analyze_image(image_path, system_prompt):
+    """Sends ONE image to Ollama in its own request and returns the parsed verdict.
+
+    Each call is fully independent: /api/generate keeps no state between requests
+    (we never pass `context` back), so nothing from a previous image can leak in.
+    """
+    prompt = (
+        f"{system_prompt}\n\n"
+        "Analyze ONLY the single image provided. Respond as JSON with these keys: "
+        "keep (true/false); if keep is true also set category, title, description, "
+        "editing_suggestions; if keep is false set reason. Leave unused fields empty."
+    )
+
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
-        "images": base64_images,
+        "images": [get_base64_image(image_path)],
         "stream": False,
+        "format": IMAGE_RESULT_SCHEMA,
         "options": {
-            "num_ctx": OLLAMA_NUM_CTX
-        }
+            "num_ctx": OLLAMA_NUM_CTX,
+            # A fresh, low-temperature pass per image; keeps verdicts deterministic.
+            "temperature": 0,
+        },
     }
-    
+
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(OLLAMA_URL, data=data, headers={'Content-Type': 'application/json'})
-    
-    # 3. Call the Ollama API
-    print("Waiting for Ollama to analyze images (this may take a while depending on your GPU)...")
+
     try:
         with urllib.request.urlopen(req) as response:
             result = json.loads(response.read().decode('utf-8'))
-            report_content = result.get('response', '')
     except urllib.error.HTTPError as e:
         error_msg = e.read().decode('utf-8')
         print(f"HTTP Error communicating with Ollama: {e.code} {e.reason}")
         print(f"Details from Ollama: {error_msg}")
-        return
+        return None
     except urllib.error.URLError as e:
         print(f"Error communicating with Ollama: {e.reason}")
-        return
+        return None
     except json.JSONDecodeError:
         print("Error: Received invalid JSON response from Ollama.")
-        return
+        return None
 
-    # 4. Format and save the report
-    report_filename = f"culling_report_{date_str}_batch_{batch_num}.md"
-    report_filepath = os.path.join(folder_path, report_filename)
-    
+    try:
+        return json.loads(result.get('response', '') or '{}')
+    except json.JSONDecodeError:
+        print(f"Warning: model returned non-JSON for {os.path.basename(image_path)}; skipping.")
+        return None
+
+
+def render_report(results, batch_num, folder_path, date_str, filenames):
+    """Builds the Keeps/Discards markdown report from per-image verdicts."""
+    keeps, discards = [], []
+    for filename, verdict in results:
+        if verdict is None:
+            discards.append(f"1. **{filename}**\n   - **Reason:** analysis failed (no valid response)\n")
+        elif verdict.get("keep"):
+            keeps.append(
+                f"1. **{filename}**\n"
+                f"   - **Category:** {verdict.get('category', '').strip() or 'Uncategorized'}\n"
+                f"   - **Title:** {verdict.get('title', '').strip()}\n"
+                f"   - **Description:** {verdict.get('description', '').strip()}\n"
+                f"   - **Editing Suggestions:** {verdict.get('editing_suggestions', '').strip()}\n"
+            )
+        else:
+            discards.append(
+                f"1. **{filename}**\n"
+                f"   - **Reason:** {verdict.get('reason', '').strip() or 'No reason given'}\n"
+            )
+
     header = f"# Photography Culling Report - Batch {batch_num}\n"
     header += f"**Folder:** `{folder_path}`\n"
     header += f"**Date:** {date_str}\n"
     header += f"**Images Reviewed:** `{filenames[0]}` to `{filenames[-1]}`\n\n---\n\n"
-    
+
+    body = "# Keeps\n" + ("".join(keeps) if keeps else "_None_\n")
+    body += "\n# Discards\n" + ("".join(discards) if discards else "_None_\n")
+    return header + body
+
+
+def process_batch(batch_files, batch_num, folder_path, date_str, system_prompt, max_workers):
+    """Analyzes each image in the batch individually, then writes one report.
+
+    Images are dispatched concurrently (bounded by max_workers), but Ollama
+    still serializes the actual inference on a memory-constrained machine.
+    Results are reassembled in the original file order for the report.
+    """
+    print(f"\nProcessing Batch {batch_num} ({len(batch_files)} images, up to {max_workers} in flight)...")
+
+    filenames = [os.path.basename(f) for f in batch_files]
+    verdicts = [None] * len(batch_files)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(analyze_image, file, system_prompt): i
+            for i, file in enumerate(batch_files)
+        }
+        for future in concurrent.futures.as_completed(future_to_index):
+            i = future_to_index[future]
+            print(f"  Finished {filenames[i]}")
+            verdicts[i] = future.result()
+
+    results = list(zip(filenames, verdicts))
+    report = render_report(results, batch_num, folder_path, date_str, filenames)
+
+    report_filename = f"culling_report_{date_str}_batch_{batch_num}.md"
+    report_filepath = os.path.join(folder_path, report_filename)
     with open(report_filepath, "w", encoding="utf-8") as f:
-        f.write(header + report_content)
-        
+        f.write(report)
+
     print(f"Report saved to: {report_filepath}")
 
 def main():
@@ -148,7 +226,12 @@ def main():
     parser.add_argument("--prompt-file", "-p", default=DEFAULT_PROMPT_FILE,
                          help=f"text file with the system prompt to use "
                               f"(default: {DEFAULT_PROMPT_FILE})")
+    parser.add_argument("--workers", "-w", type=int, default=MAX_WORKERS,
+                         help=f"max images analyzed concurrently (default: {MAX_WORKERS}; "
+                              f"keep low on <=8GB RAM)")
     args = parser.parse_args()
+
+    max_workers = max(1, args.workers)
 
     try:
         system_prompt = load_system_prompt(args.prompt_file)
@@ -186,7 +269,7 @@ def main():
     batches = [images[i:i + BATCH_SIZE] for i in range(0, total_images, BATCH_SIZE)]
 
     for i, batch in enumerate(batches, start=1):
-        process_batch(batch, i, folder_path, date_str, system_prompt)
+        process_batch(batch, i, folder_path, date_str, system_prompt, max_workers)
 
     print("\nAll batches processed successfully!")
 
