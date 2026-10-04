@@ -82,7 +82,11 @@ def main():
         st.header("Settings")
         db_path = st.text_input("Chroma DB path", value=str(sc.DEFAULT_DB_PATH))
         top_k = st.slider("Results (top-k)", min_value=1, max_value=30, value=10)
-        chat_model = st.text_input("Chat model", value=sc.CHAT_MODEL)
+        chat_model = st.selectbox(
+            "Chat model", options=sc.CHAT_MODELS,
+            index=sc.CHAT_MODELS.index(sc.CHAT_MODEL),
+            help="Pull it first, e.g. `ollama pull phi4-mini`. "
+                 "Override the list with XMP_SEARCH_CHAT_MODELS.")
         categories = cached_categories(db_path)
         category = st.selectbox("Category filter", options=["(all)"] + categories)
         category = None if category == "(all)" else category

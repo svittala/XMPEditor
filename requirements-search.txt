@@ -6,7 +6,9 @@
 #
 # Also requires a running Ollama (http://localhost:11434) with:
 #   ollama pull nomic-embed-text
-#   ollama pull llama3.1
+#   ollama pull llama3.1      # or a lighter chat model:
+#   ollama pull qwen3:1.7b
+#   ollama pull phi4-mini
 langchain>=0.3
 langchain-chroma>=0.1.4
 langchain-ollama>=0.2

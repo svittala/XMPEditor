@@ -9,11 +9,14 @@ the Streamlit app (app.py) import from here so the models/paths stay in sync.
 Configurable via environment variables:
     XMP_SEARCH_EMBED_MODEL   embedding model      (default: nomic-embed-text)
     XMP_SEARCH_CHAT_MODEL    chat/RAG model        (default: llama3.1)
+    XMP_SEARCH_CHAT_MODELS   comma-separated choices offered in the UI
+                             (default: llama3.1,qwen3:1.7b,phi4-mini)
     XMP_SEARCH_DB            Chroma persist dir     (default: <repo>/chroma_db)
     OLLAMA_HOST / OLLAMA_URL Ollama base url        (default: http://localhost:11434)
 """
 
 import os
+import re
 from pathlib import Path
 
 from langchain_chroma import Chroma
@@ -24,6 +27,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 EMBED_MODEL = os.environ.get("XMP_SEARCH_EMBED_MODEL", "nomic-embed-text")
 CHAT_MODEL = os.environ.get("XMP_SEARCH_CHAT_MODEL", "llama3.1")
+# Chat models selectable in the UI (Ollama tags). Lighter ones first-class so a
+# modest machine can avoid llama3.1. The default is always included.
+CHAT_MODELS = [m.strip() for m in os.environ.get(
+    "XMP_SEARCH_CHAT_MODELS", "llama3.1,qwen3:1.7b,phi4-mini").split(",") if m.strip()]
+if CHAT_MODEL not in CHAT_MODELS:
+    CHAT_MODELS.insert(0, CHAT_MODEL)
 DEFAULT_DB_PATH = Path(os.environ.get("XMP_SEARCH_DB", str(REPO_ROOT / "chroma_db")))
 COLLECTION = "culling"
 
@@ -123,4 +132,6 @@ def answer_question(vs, question, k=6, category=None, chat_model=None):
     chain = prompt | llm
     resp = chain.invoke({"context": _format_context(docs), "question": question})
     answer = getattr(resp, "content", str(resp))
+    # Reasoning models (e.g. qwen3) may inline their chain of thought.
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
     return answer, docs
