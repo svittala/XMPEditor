@@ -155,7 +155,16 @@ parser) and `xmp_common.read_text`.
 ```
 pip install -r requirements-search.txt
 ollama pull nomic-embed-text     # embeddings
-ollama pull llama3.1             # chat / RAG model
+ollama pull llama3.1             # chat / RAG model (default, heaviest)
+```
+
+`llama3.1` is the default but is heavy. For a lighter machine, pull one or both
+of these instead (you only need the chat models you plan to use):
+
+```
+ollama pull qwen3:1.7b           # small, fast
+ollama pull phi4-mini            # small, good quality for its size
+ollama list                      # confirm what's installed
 ```
 
 Ollama must be running at `http://localhost:11434` (the same instance the
@@ -186,9 +195,22 @@ streamlit run search/app.py        # opens http://localhost:8501
 - **Ask tab** — ask a question (e.g. "which nature images need more contrast?")
   and the local LLM answers over the retrieved images, citing them by filename.
 - The sidebar has a category filter, a top-k slider, and lets you point at a
-  different Chroma path or chat model.
+  different Chroma path, and a **Chat model** dropdown (`llama3.1`,
+  `qwen3:1.7b`, `phi4-mini`). The choice applies to the Ask tab and can be
+  changed at any time; the model must already be pulled in Ollama.
 
-Models and paths can be overridden with the `XMP_SEARCH_EMBED_MODEL`,
-`XMP_SEARCH_CHAT_MODEL`, and `XMP_SEARCH_DB` environment variables (see
-`search/search_core.py`). Note the culling helper's `qwen2.5vl:7b` is a vision
+#### Choosing the chat model
+
+- **Per session:** use the sidebar dropdown.
+- **Default model:** set `XMP_SEARCH_CHAT_MODEL`, e.g.
+  `XMP_SEARCH_CHAT_MODEL=phi4-mini streamlit run search/app.py`.
+- **Dropdown contents:** set `XMP_SEARCH_CHAT_MODELS` to a comma-separated list
+  of Ollama tags, e.g. `XMP_SEARCH_CHAT_MODELS=phi4-mini,qwen3:4b,llama3.1`.
+  The default model is always included.
+- Reasoning models such as qwen3 may emit `<think>…</think>` text; it is
+  stripped from answers automatically.
+
+The embedding model and DB path can be overridden with `XMP_SEARCH_EMBED_MODEL`
+and `XMP_SEARCH_DB` (see `search/search_core.py`). Changing the embedding model
+requires rebuilding the index with `--rebuild`. Note the culling helper's `qwen2.5vl:7b` is a vision
 model; RAG chat uses a text model (`llama3.1` by default).
