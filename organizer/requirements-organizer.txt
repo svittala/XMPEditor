@@ -1,0 +1,4 @@
+# Needed only by step3_find_duplicates.py (steps 1, 2, 4, 5 are stdlib-only).
+#   pip install -r organizer\requirements-organizer.txt
+Pillow>=10
+pillow-heif>=0.16   # optional: lets step 3 read iPhone .HEIC files
