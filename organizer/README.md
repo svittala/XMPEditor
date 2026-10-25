@@ -29,6 +29,13 @@ python organizer\step1_organize.py E:\Photos\Inbox E:\Photos\Organized
 python organizer\step1_organize.py E:\Photos\Inbox E:\Photos\Organized --apply
 #    Changed your mind?  python organizer\step1_organize.py --undo E:\Photos\Organized\_reports\step1_manifest_<ts>.csv --apply
 
+# 1b. (optional) iPhone edits: move .aae files left in the source folders next to their photos
+python organizer\step1b_move_aae.py E:\Photos\Organized\_reports\step1_manifest_<ts>.csv --apply
+#    (omit --apply for a dry run; --undo <step1b_manifest> --apply reverses it)
+
+# 1c. (optional) Remove source folders left empty. Lists first; --apply asks you to type DELETE.
+python organizer\step1c_remove_empty_dirs.py E:\Photos\Organized\_reports\step1_manifest_<ts>.csv E:\Photos\Organized\_reports\step1b_manifest_<ts>.csv --apply
+
 # 2. (optional) Convert camcorder .MTS/.M2TS/.MOD to .mp4
 python organizer\step2_convert_videos.py E:\Photos\Organized --apply
 

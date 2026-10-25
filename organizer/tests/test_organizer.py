@@ -10,6 +10,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import common as c  # noqa: E402
 import step1_organize as s1  # noqa: E402
+import step1b_move_aae as s1b  # noqa: E402
+import step1c_remove_empty_dirs as s1c  # noqa: E402
 
 
 def fake_exiftool(table):
@@ -164,6 +166,63 @@ class OrganizeTests(unittest.TestCase):
                                  fs_date_fallback=False)[0:2]
         self.assertIsNone(entries[0].dt)
         self.assertEqual(entries[0].dst_dir, self.dest / c.UNDATED_DIR)
+
+
+    def test_leftover_aae_follow_photos_and_undo(self):
+        self.make("trip/IMG_1234.JPG", b"orig")
+        self.make("trip/IMG_E1234.JPG", b"edit")
+        self.make("trip/IMG_1234.AAE", b"aae1")      # belongs with the original
+        self.make("trip/IMG_E5678.JPG", b"edit2")    # original not present
+        self.make("trip/IMG_5678.AAE", b"aae2")
+        self.make("trip/IMG_9999.AAE", b"orphan")    # no photo -> stays
+        rec = {"ExifIFD:DateTimeOriginal": "2023:05:14 10:00:00"}
+        fn = fake_exiftool({"IMG_1234.JPG": rec, "IMG_E1234.JPG": rec, "IMG_E5678.JPG": rec})
+        # step 1 takes exact-name sidecars (IMG_1234.AAE) itself; IMG_5678.AAE
+        # (edit of IMG_E5678) is left behind for step 1b
+        s1.organize(self.src, self.dest, apply=True, exiftool_fn=fn, quiet=True)
+        self.assertTrue((self.dest / "2023-05-14" / "IMG_1234.AAE").exists())
+        manifest = sorted((self.dest / c.REPORTS_DIR).glob("step1_manifest_*.csv"))[0]
+
+        s1b.run(manifest, self.dest, apply=False, quiet=True)
+        self.assertTrue((self.src / "trip" / "IMG_5678.AAE").exists())   # dry run
+
+        s1b.run(manifest, self.dest, apply=True, quiet=True)
+        day = self.dest / "2023-05-14"
+        self.assertTrue((day / "IMG_5678.AAE").exists())                 # via IMG_E5678
+        self.assertTrue((self.src / "trip" / "IMG_9999.AAE").exists())   # orphan stays
+        self.assertFalse((self.src / "trip" / "IMG_5678.AAE").exists())
+
+        m = sorted((self.dest / c.REPORTS_DIR).glob("step1b_manifest_*.csv"))[0]
+        c.undo_manifest(m, apply=True)
+        self.assertTrue((self.src / "trip" / "IMG_5678.AAE").exists())
+
+
+class RemoveEmptyDirsTests(unittest.TestCase):
+    setUp, tearDown, make = OrganizeTests.setUp, OrganizeTests.tearDown, OrganizeTests.make
+
+    def test_removes_only_emptied_folders_after_confirm(self):
+        self.make("a/x/1.jpg", b"1")
+        self.make("a/x/2.jpg", b"2")
+        self.make("b/3.jpg", b"3")
+        self.make("b/notes.txt", b"keep me")        # stays -> b is not empty
+        rec = {"ExifIFD:DateTimeOriginal": "2023:05:14 10:00:00"}
+        fn = fake_exiftool({"1.jpg": rec, "2.jpg": rec, "3.jpg": rec})
+        s1.organize(self.src, self.dest, apply=True, exiftool_fn=fn, quiet=True)
+        manifest = sorted((self.dest / c.REPORTS_DIR).glob("step1_manifest_*.csv"))[0]
+
+        s1c.run([manifest], apply=False, src_root=self.src, dest=self.dest, quiet=True)
+        self.assertTrue((self.src / "a" / "x").exists())            # dry run
+
+        s1c.run([manifest], apply=True, src_root=self.src, dest=self.dest,
+                confirm=lambda _: "no", quiet=True)
+        self.assertTrue((self.src / "a" / "x").exists())            # not confirmed
+
+        removed = s1c.run([manifest], apply=True, src_root=self.src, dest=self.dest,
+                          confirm=lambda _: "DELETE", quiet=True)
+        self.assertEqual({p.name for p in removed}, {"x", "a"})
+        self.assertFalse((self.src / "a").exists())
+        self.assertTrue((self.src / "b" / "notes.txt").exists())
+        self.assertTrue(self.src.exists())                          # root kept
 
 
 class DuplicateTests(unittest.TestCase):
