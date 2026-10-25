@@ -1,7 +1,7 @@
 # Photo organizer (Windows)
 
 Five small scripts that sort a messy photo/video folder into `yyyy-mm-dd`
-folders by **real capture date** (never the file's modified/created date), then
+folders by **real capture date** (file modified date only as a last resort), then
 find and remove duplicates. Every step is a dry run until you pass `--apply`,
 and every real change is written to a manifest CSV so it can be undone.
 
@@ -49,8 +49,9 @@ First valid value wins: EXIF `DateTimeOriginal` -> QuickTime/iPhone `CreationDat
 `.modd` sidecar -> a date inside an `.xmp` sidecar -> a date in the file name
 (`IMG_20230514_...`, `PXL_...`, `VID-20230514-WA...`). Dates before 1990, in the
 future, or "clock never set" values like 2000-01-01 are ignored. Files with
-no trustworthy date go to `_undated\<original sub-path>`. The plan CSV shows
-the ignored filesystem date in `fs_mtime_ignored` for reference only.
+embedded date use the file's modified date as a last resort (`date_source` =
+`fs_mtime` in the plan CSV; pass `--no-fs-date` to disable). Files still without
+a trustworthy date go to a flat `_undated` folder, not their source sub-path.
 
 Sidecars (`.xmp`, `.acr`, `.aae`, `.thm`, `.modd`, `.moff`, `.mdi`, `.moi`) move with
 their photo/video and are renamed to match. If a name already exists, the new

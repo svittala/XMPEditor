@@ -7,9 +7,9 @@ Step 1 - organize photos/videos into DEST\\yyyy-mm-dd\\ by real capture date.
     python step1_organize.py --undo DEST\\_reports\\step1_manifest_<ts>.csv [--apply]
 
 The capture date comes from file metadata (EXIF / QuickTime / AVCHD stream /
-XMP sidecar / date in the file name), never from the filesystem dates, which
-only say when the file was copied. Files with no trustworthy date go to
-DEST\\_undated\\<original relative path>.
+XMP sidecar / date in the file name). Only when a file has none of those is its
+filesystem modified date used (date_source "fs_mtime"; disable with
+--no-fs-date). Files still without a trustworthy date go to DEST\\_undated.
 """
 
 import argparse
@@ -46,7 +46,7 @@ def new_name_for(path, dt):
     return path.name
 
 
-def build_plan(src, dest, exiftool_fn, min_date=c.MIN_DATE):
+def build_plan(src, dest, exiftool_fn, min_date=c.MIN_DATE, fs_date_fallback=True):
     """Scan src and return (entries, stats). `exiftool_fn(paths, ee)` returns
     {normcase(abspath): record}; injected so tests don't need exiftool."""
     src, dest = Path(src), Path(dest)
@@ -112,12 +112,18 @@ def build_plan(src, dest, exiftool_fn, min_date=c.MIN_DATE):
             if c.is_valid_date(fdt, min_date):
                 dt, source = fdt, "filename"
 
+        if dt is None and fs_date_fallback:
+            # Last resort: no embedded metadata at all, so use the file's
+            # modified time rather than leaving it in a source-shaped folder.
+            fdt = _fs_datetime(path)
+            if c.is_valid_date(fdt, min_date):
+                dt, source = fdt, "fs_mtime"
+
         if dt is not None:
             dst_dir = dest / dt.strftime("%Y-%m-%d")
             new_name = new_name_for(path, dt)
         else:
-            rel = path.parent.relative_to(src) if path.is_relative_to(src) else Path()
-            dst_dir = dest / c.UNDATED_DIR / rel
+            dst_dir = dest / c.UNDATED_DIR
             new_name = path.name
             source = "none"
         stats[f"date_source:{source.split(':')[0] if source != 'none' else 'undated'}"] += 1
@@ -126,11 +132,16 @@ def build_plan(src, dest, exiftool_fn, min_date=c.MIN_DATE):
     return entries, stats, ignored
 
 
-def _fs_mtime(path):
+def _fs_datetime(path):
     try:
-        return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.fromtimestamp(path.stat().st_mtime)
     except OSError:
-        return ""
+        return None
+
+
+def _fs_mtime(path):
+    dt = _fs_datetime(path)
+    return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
 
 
 def execute(entries, dest, apply, copy, manifest, plan_rows):
@@ -190,10 +201,10 @@ def execute(entries, dest, apply, copy, manifest, plan_rows):
 
 
 def organize(src, dest, apply=False, copy=False, exiftool_fn=None,
-             min_date=c.MIN_DATE, quiet=False):
+             min_date=c.MIN_DATE, quiet=False, fs_date_fallback=True):
     src, dest = Path(src), Path(dest)
     ts = c.timestamp()
-    entries, stats, ignored = build_plan(src, dest, exiftool_fn, min_date)
+    entries, stats, ignored = build_plan(src, dest, exiftool_fn, min_date, fs_date_fallback)
 
     plan_rows = []
     manifest = None
@@ -240,6 +251,9 @@ def main(argv=None):
     ap.add_argument("--exiftool", help="path to exiftool.exe (else EXIFTOOL env var, else PATH)")
     ap.add_argument("--min-year", type=int, default=1990,
                     help="ignore capture dates before this year (default 1990)")
+    ap.add_argument("--no-fs-date", action="store_true",
+                    help="don't fall back to the file's modified date when it has no "
+                         "embedded capture date (those files go to _undated)")
     ap.add_argument("--undo", metavar="MANIFEST", help="reverse a step1 manifest CSV")
     args = ap.parse_args(argv)
 
@@ -264,7 +278,8 @@ def main(argv=None):
         return c.exiftool_batch(paths, exiftool, ee=ee)
 
     organize(src, dest, apply=args.apply, copy=args.copy, exiftool_fn=fn,
-             min_date=datetime(args.min_year, 1, 1))
+             min_date=datetime(args.min_year, 1, 1),
+             fs_date_fallback=not args.no_fs_date)
     return 0
 
 

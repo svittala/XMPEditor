@@ -110,18 +110,20 @@ class OrganizeTests(unittest.TestCase):
         fn = fake_exiftool(table)
 
         # dry run changes nothing
-        s1.organize(self.src, self.dest, apply=False, exiftool_fn=fn, quiet=True)
+        s1.organize(self.src, self.dest, apply=False, exiftool_fn=fn, quiet=True,
+                     fs_date_fallback=False)
         self.assertTrue((self.src / "a.jpg").exists())
         self.assertFalse((self.dest / "2023-05-14").exists())
 
-        s1.organize(self.src, self.dest, apply=True, exiftool_fn=fn, quiet=True)
+        s1.organize(self.src, self.dest, apply=True, exiftool_fn=fn, quiet=True,
+                    fs_date_fallback=False)
         day = self.dest / "2023-05-14"
         self.assertTrue((day / "a.jpg").exists())
         self.assertTrue((day / "b.CR3").exists())
         self.assertTrue((day / "b.xmp").exists())          # sidecar followed
         self.assertTrue((self.dest / "2011-07-04" / "2011-07-04_153001.mts").exists())
         self.assertTrue((self.dest / "2011-07-04" / "2011-07-04_153001.modd").exists())
-        self.assertTrue((self.dest / c.UNDATED_DIR / "sub" / "mystery.jpg").exists())
+        self.assertTrue((self.dest / c.UNDATED_DIR / "mystery.jpg").exists())
         self.assertFalse((self.src / "a.jpg").exists())
 
         manifests = sorted((self.dest / c.REPORTS_DIR).glob("step1_manifest_*.csv"))
@@ -145,13 +147,23 @@ class OrganizeTests(unittest.TestCase):
         dup_dir = self.dest / c.DUPLICATES_DIR / "2022-01-02"
         self.assertEqual(len(list(dup_dir.iterdir())), 1)
 
-    def test_filesystem_date_is_not_used(self):
-        p = self.make("old.jpg")
+    def test_filesystem_date_is_last_resort(self):
+        p = self.make("sub/old.jpg")
         os.utime(p, (1_000_000_000, 1_000_000_000))  # 2001
         entries, _ = s1.organize(self.src, self.dest, apply=False,
                                  exiftool_fn=fake_exiftool({}), quiet=True)[0:2]
+        self.assertEqual(entries[0].source, "fs_mtime")
+        self.assertRegex(entries[0].dst_dir.name, r"^2001-09-\d\d$")
+        self.assertEqual(entries[0].dst_dir.parent, self.dest)  # no source sub-path
+
+    def test_no_fs_date_goes_to_flat_undated(self):
+        p = self.make("sub/old.jpg")
+        os.utime(p, (1_000_000_000, 1_000_000_000))
+        entries, _ = s1.organize(self.src, self.dest, apply=False,
+                                 exiftool_fn=fake_exiftool({}), quiet=True,
+                                 fs_date_fallback=False)[0:2]
         self.assertIsNone(entries[0].dt)
-        self.assertEqual(entries[0].dst_dir.name, c.UNDATED_DIR)
+        self.assertEqual(entries[0].dst_dir, self.dest / c.UNDATED_DIR)
 
 
 class DuplicateTests(unittest.TestCase):
