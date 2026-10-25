@@ -7,8 +7,9 @@ RemoveEmptyFolders - recursively remove empty folders under a folder you choose.
 Looks at every subfolder. A folder is "empty" if it has no files, or only
 Windows/macOS junk (Thumbs.db, desktop.ini, .DS_Store, ...), and all of its
 subfolders are empty too. Lists them, then asks you to type DELETE before
-removing anything. The folder you choose is kept. Folders that are kept are
-listed with the reason.
+removing anything. Folders that are kept are listed with the reason. If the
+folder you chose ends up empty too, you are asked separately whether to
+remove it as well.
 """
 
 import os
@@ -33,13 +34,18 @@ def display(path):
 
 
 def scan(root):
-    """Return (empty, kept, total). empty: [(folder, [junk files])] deepest
-    first, root excluded. kept: {folder: reason}."""
+    """Return (empty, kept, total, root_junk). empty: [(folder, [junk files])]
+    deepest first, root excluded. kept: {folder: reason}. root_junk: None if
+    the root itself would not be empty, else its junk files (usually [])."""
     root = long_path(root)
     empty, kept = {}, {}
     total = 0
+    root_junk = None
     for dirpath, dirnames, filenames in os.walk(root, topdown=False):
         if dirpath == root:
+            real = [f for f in filenames if f.lower() not in JUNK_NAMES]
+            if not real and all(os.path.join(dirpath, d) in empty for d in dirnames):
+                root_junk = [os.path.join(dirpath, f) for f in filenames]
             continue
         total += 1
         real = [f for f in filenames if f.lower() not in JUNK_NAMES]
@@ -53,7 +59,7 @@ def scan(root):
             kept[dirpath] = f"contains non-empty folder {os.path.basename(busy_subs[0])!r}"
         else:
             empty[dirpath] = [os.path.join(dirpath, f) for f in filenames]
-    return list(empty.items()), kept, total
+    return list(empty.items()), kept, total, root_junk
 
 
 def remove_folder(path, junk):
@@ -70,28 +76,45 @@ def run(root):
     if not os.path.isdir(long_path(root)):
         print(f"Folder not found: {root!r}")
         return 1
-    empty, kept, total = scan(root)
+    root = long_path(root)
+    empty, kept, total, root_junk = scan(root)
     print(f"Scanned {total} subfolder(s) under {display(long_path(root))}")
     for path, junk in empty:
         extra = f"  (only {len(junk)} junk file(s): {os.path.basename(junk[0])})" if junk else ""
         print(f"  empty: {display(path)}{extra}")
     for path, why in sorted(kept.items()):
         print(f"  kept:  {display(path)}  - {why}")
-    if not empty:
+    if not empty and root_junk is None:
         print("\nNo empty folders found.")
         return 0
 
-    if input(f"\nType DELETE to remove {len(empty)} empty folder(s): ").strip() != "DELETE":
-        print("Cancelled.")
-        return 1
-    removed = 0
-    for path, junk in empty:
-        try:
-            remove_folder(path, junk)
-            removed += 1
-        except OSError as ex:
-            print(f"  skipped {display(path)}: {ex}")
-    print(f"Removed {removed} folder(s).")
+    if empty:
+        if input(f"\nType DELETE to remove {len(empty)} empty folder(s): ").strip() != "DELETE":
+            print("Cancelled.")
+            return 1
+        removed = 0
+        failed = False
+        for path, junk in empty:
+            try:
+                remove_folder(path, junk)
+                removed += 1
+            except OSError as ex:
+                failed = True
+                print(f"  skipped {display(path)}: {ex}")
+        print(f"Removed {removed} folder(s).")
+    else:
+        failed = False
+
+    if root_junk is not None and not failed:
+        print(f"\n{display(root)} is now empty too.")
+        if input("Type DELETE to remove it as well: ").strip() == "DELETE":
+            try:
+                remove_folder(root, root_junk)
+                print("Removed it.")
+            except OSError as ex:
+                print(f"  skipped: {ex}")
+        else:
+            print("Kept it.")
     return 0
 
 
