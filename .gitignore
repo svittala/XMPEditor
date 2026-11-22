@@ -6,3 +6,5 @@ __pycache__/
 
 # Semantic search tool: local Chroma vector store (rebuilt from reports)
 chroma_db/
+
+.venv/
