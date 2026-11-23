@@ -5,19 +5,18 @@ import json
 import os
 import glob
 from datetime import datetime
-import google.generativeai as genai
+from google import genai
 from PIL import Image
 
 # ==========================================
 # Configuration
 # ==========================================
 # Install dependencies:
-#   pip install google-generativeai pillow
+#   pip install google-genai pillow
 
-# API key: env var takes priority; hardcoded value is the fallback.
+# API key: env var GEMINI_API_KEY takes priority; hardcoded value is the fallback.
 # Best practice: set GEMINI_API_KEY in your environment and leave the line below as None.
 API_KEY = None
-
 MODEL_NAME = "gemini-3.8-flash"  # or "gemini-3.8-flash-image" for image-specific tasks
 BATCH_SIZE = 10                  # images per API call
 
@@ -149,23 +148,26 @@ def render_report(results, batch_num, folder_path, date_str, model_name):
     return report_filepath
 
 
-def process_batch(batch_files, batch_num, folder_path, date_str, model, system_prompt):
+def process_batch(batch_files, batch_num, folder_path, date_str, client, model_name, system_prompt):
     """Prepares a batch of images, calls Gemini, parses JSON, and saves the report."""
     print(f"\nProcessing Batch {batch_num} ({len(batch_files)} images)...")
 
     filenames = [os.path.basename(f) for f in batch_files]
 
-    # Build content: [system_prompt, img1, img2, ..., filename_mapping]
-    content = [system_prompt]
+    # Build contents: [system_prompt, img1, img2, ..., filename_mapping]
+    contents = [system_prompt]
     for file in batch_files:
-        content.append(prepare_image_for_api(file))
-    content.append(
+        contents.append(prepare_image_for_api(file))
+    contents.append(
         f"The images provided above are in the following order: {', '.join(filenames)}."
     )
 
     print("Waiting for Gemini to analyze images...")
     try:
-        response = model.generate_content(content)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=contents
+        )
         raw_text = response.text
     except Exception as e:
         print(f"  Error communicating with Gemini: {e}")
@@ -184,7 +186,7 @@ def process_batch(batch_files, batch_num, folder_path, date_str, model, system_p
         print(f"  Raw response saved: {fallback}")
         return
 
-    render_report(results, batch_num, folder_path, date_str, model.model_name)
+    render_report(results, batch_num, folder_path, date_str, model_name)
 
 
 # ==========================================
@@ -207,15 +209,16 @@ def main():
         print(f"Error: could not read prompt file '{args.prompt_file}': {e}")
         return
 
-    # Resolve API key — env var takes priority over the hardcoded fallback
+        # Resolve API key — env var takes priority over the hardcoded fallback
     api_key = os.environ.get("GEMINI_API_KEY") or API_KEY
     if not api_key:
         print("Error: No Gemini API key found.")
         print("  Set the GEMINI_API_KEY environment variable, or edit API_KEY in this script.")
+        print("  In PowerShell, run: $env:GEMINI_API_KEY=\"your_key_here\"")
+        print("  In Command Prompt, run: set GEMINI_API_KEY=your_key_here")
         return
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(MODEL_NAME)
+    client = genai.Client(api_key=api_key)
 
     # Get folder
     folder_path = args.folder or input("Enter the folder path containing the images: ").strip()
@@ -239,7 +242,7 @@ def main():
     batches  = [images[i:i + BATCH_SIZE] for i in range(0, len(images), BATCH_SIZE)]
 
     for i, batch in enumerate(batches, start=1):
-        process_batch(batch, i, folder_path, date_str, model, system_prompt)
+        process_batch(batch, i, folder_path, date_str, client, MODEL_NAME, system_prompt)
 
     print("\nAll batches processed successfully!")
 

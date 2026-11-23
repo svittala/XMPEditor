@@ -72,7 +72,7 @@ _SECTION_RE = re.compile(r"^#+\s*(Keeps?|Discards?)\b", re.IGNORECASE)
 # 1) Gemini markdown heading: "## 1. 20261102-IMG_6508.jpg  —  🔧 Needs edits"
 # 2) Bullet item: "1. **20261102-IMG_6508.jpg**: ..."
 _ITEM_HEADING_RE = re.compile(
-    r"^##+\s*(?:\d+\.\s*)?([^\s—\-]+(?:\.[A-Za-z0-9]+)?)(?:\s*[—\-]+\s*(.*))?$"
+    r"^##+\s*(?:\d+\.\s*)?(\S+?)(?:\s*(?:[—–]|--|\s-)\s*(.*))?$"
 )
 # Only match numbered bullets for filenames (e.g. "1. **filename.jpg**: ...")
 # Avoid matching dash bullets (e.g. "- **Scores:**") to prevent conflicts with fields.
@@ -243,7 +243,6 @@ DEFAULT_BASE_DIR = Path(r"G:\photoedits")
 def infer_images_dir(filename, base_dir=DEFAULT_BASE_DIR):
     """
     Infers directory from 'YYYYMMDD-...' filename format.
-    Example: 20261102-IMG_6508.jpg -> G:\photoedits\2026\2026-11-02
     """
     m = _DATE_PREFIX_RE.match(filename)
     if m:
@@ -287,20 +286,45 @@ def find_sidecar(filename, images_dir):
     return None
 
 
+def find_sidecar_in_base(filename, base_dir=DEFAULT_BASE_DIR):
+    """Fallback search across base_dir when filename has no date prefix."""
+    stem = Path(filename).stem
+    clean_stem = re.sub(r"^\d{4}[-_]?\d{2}[-_]?\d{2}[-_]?", "", stem)
+    
+    # 1. Exact stem.xmp in base_dir tree
+    matches = list(Path(base_dir).glob(f"**/{clean_stem}.xmp")) + list(Path(base_dir).glob(f"**/{clean_stem}.XMP"))
+    if matches:
+        return matches[0]
+
+    # 2. Match by frame number
+    num_match = re.search(r"\d{4,}", clean_stem)
+    if num_match:
+        num = num_match.group(0)
+        matches = list(Path(base_dir).glob(f"**/*{num}*.xmp")) + list(Path(base_dir).glob(f"**/*{num}*.XMP"))
+        if matches:
+            return matches[0]
+            
+    return None
+
+
 def apply_entry(entry, images_dir, no_backup, dry_run, apply_develop_edits, base_dir=DEFAULT_BASE_DIR):
     filename = entry["filename"]
 
-    # If --images-dir was not supplied, or to auto-locate per image:
-    target_dir = images_dir
-    if not target_dir:
+    sidecar = None
+    if images_dir:
+        sidecar = find_sidecar(filename, images_dir)
+    else:
+        # First attempt date inference from filename (e.g. 20261102-OV7A7244.jpg)
         target_dir = infer_images_dir(filename, base_dir=Path(base_dir))
-        if not target_dir:
-            print(f"  skip {filename}: could not infer directory from filename pattern YYYYMMDD-*")
-            return False
+        if target_dir:
+            sidecar = find_sidecar(filename, target_dir)
+        
+        # Fallback: search across base_dir (e.g. for bare names like OV7A7244.jpg)
+        if not sidecar:
+            sidecar = find_sidecar_in_base(filename, base_dir=Path(base_dir))
 
-    sidecar = find_sidecar(filename, target_dir)
     if not sidecar:
-        print(f"  skip {filename}: no .xmp sidecar found in {target_dir}")
+        print(f"  skip {filename}: no .xmp sidecar found")
         return False
 
     old_text = xc.read_text(sidecar)
