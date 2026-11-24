@@ -7,6 +7,7 @@ import glob
 from datetime import datetime
 from google import genai
 from PIL import Image
+from dotenv import load_dotenv
 
 # ==========================================
 # Configuration
